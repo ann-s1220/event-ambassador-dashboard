@@ -1,5 +1,8 @@
 # Event & Ambassador Dashboard
 
+![Member attendance tab](screenshots/attendance.png)
+![Ambassador leaderboard](screenshots/ambassadors.png)
+
 A Streamlit dashboard for tracking event attendance and student ambassador
 performance, built with SQLite and pandas.
 
