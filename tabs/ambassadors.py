@@ -208,6 +208,69 @@ def _log_post(conn):
             st.rerun()
 
 
+@st.dialog("Confirm delete")
+def _confirm_delete_post_dialog(post_id: int, label: str):
+    st.write(f"You are about to delete this social post: **{label}**.")
+    st.markdown("Are you sure you want to delete this post? **This cannot be undone.**")
+    c1, c2 = st.columns(2)
+    if c1.button("Cancel"):
+        st.rerun()
+    if c2.button("Confirm delete", type="primary"):
+        conn = st.session_state["_conn"]
+        conn.execute("DELETE FROM ambassador_social_posts WHERE post_id = ?", (post_id,))
+        conn.commit()
+        db.log_edit(conn, f"Social post deleted: {label}")
+        st.session_state["_post_deleted_notice"] = label
+        st.rerun()
+
+
+def _social_posts_section(conn):
+    """Delete a single mistaken social post (wrong ambassador/event
+    attributed) -- a hard delete, unlike the GDPR tab's anonymize-in-place:
+    this is correcting a data-entry error, not fulfilling a privacy
+    request. Shows every post (not scoped to whichever ambassador is
+    selected in the leaderboard drill-down above), since a
+    wrongly-attributed post is exactly the case where it might be sitting
+    under the wrong ambassador's name. Logged to edit_log, separate from
+    deletion_log."""
+    st.session_state["_conn"] = conn
+
+    if st.session_state.get("_post_deleted_notice"):
+        st.success(f"Deleted social post: {st.session_state.pop('_post_deleted_notice')}")
+
+    with st.expander("Social posts (delete a mistaken entry)", expanded=False):
+        records = db.df(
+            conn,
+            """SELECT p.post_id, COALESCE(amb.name, '(ambassador removed)') AS ambassador_name,
+                      e.name AS event_name, p.date_posted
+               FROM ambassador_social_posts p
+               JOIN events e ON e.event_id = p.event_id
+               LEFT JOIN ambassadors amb ON amb.ambassador_id = p.ambassador_id
+               ORDER BY p.date_posted DESC, p.post_id DESC""",
+        )
+        if records.empty:
+            st.caption("No social posts logged yet.")
+            return
+
+        st.dataframe(records.drop(columns=["post_id"]), width="stretch")
+
+        delete_id = st.selectbox(
+            "Select a post to delete",
+            options=[None] + list(records["post_id"]),
+            format_func=lambda pid: "-- select --" if pid is None else (
+                f"{records.loc[records.post_id == pid, 'ambassador_name'].iloc[0]} — "
+                f"{records.loc[records.post_id == pid, 'event_name'].iloc[0]} — "
+                f"{records.loc[records.post_id == pid, 'date_posted'].iloc[0]}"
+            ),
+            key="post_delete_select",
+        )
+        if delete_id is not None:
+            row = records.loc[records.post_id == delete_id].iloc[0]
+            label = f"{row['ambassador_name']} — {row['event_name']} — {row['date_posted']}"
+            if st.button("Delete post", type="primary", key="post_delete_btn"):
+                _confirm_delete_post_dialog(int(delete_id), label)
+
+
 def _excel_post_import_section(conn):
     """Bulk-log social media posts from an Excel file. Ambassadors are
     matched by email (falling back to name) against the existing roster,
@@ -299,5 +362,7 @@ def render(conn):
     _roster(conn)
     st.divider()
     _log_post(conn)
+    st.divider()
+    _social_posts_section(conn)
     st.divider()
     _excel_post_import_section(conn)

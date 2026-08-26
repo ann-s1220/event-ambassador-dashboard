@@ -732,11 +732,74 @@ def _members_list(conn):
         )
 
 
+@st.dialog("Confirm delete")
+def _confirm_delete_attendance_dialog(attendance_id: int, label: str):
+    st.write(f"You are about to delete this attendance record: **{label}**.")
+    st.markdown("Are you sure you want to delete this record? **This cannot be undone.**")
+    c1, c2 = st.columns(2)
+    if c1.button("Cancel"):
+        st.rerun()
+    if c2.button("Confirm delete", type="primary"):
+        conn = st.session_state["_conn"]
+        conn.execute("DELETE FROM attendance WHERE attendance_id = ?", (attendance_id,))
+        conn.commit()
+        db.log_edit(conn, f"Attendance record deleted: {label}")
+        st.session_state["_attendance_deleted_notice"] = label
+        st.rerun()
+
+
+def _attendance_records_section(conn):
+    """Delete a single mistaken attendance record (wrong event/status
+    logged) -- a hard delete, unlike the GDPR tab's anonymize-in-place:
+    this is correcting a data-entry error, not fulfilling a privacy
+    request, so there's no person's data to protect by keeping the row
+    around unlinked. Logged to edit_log, separate from deletion_log."""
+    st.session_state["_conn"] = conn
+
+    if st.session_state.get("_attendance_deleted_notice"):
+        st.success(f"Deleted attendance record: {st.session_state.pop('_attendance_deleted_notice')}")
+
+    with st.expander("Attendance records (delete a mistaken entry)", expanded=False):
+        records = db.df(
+            conn,
+            """SELECT a.attendance_id, e.name AS event_name, e.date AS event_date,
+                      COALESCE(m.name, '(anonymized/removed)') AS member_name,
+                      a.status, a.source_type
+               FROM attendance a
+               JOIN events e ON e.event_id = a.event_id
+               LEFT JOIN members m ON m.member_id = a.member_id
+               ORDER BY e.date DESC, a.attendance_id DESC""",
+        )
+        if records.empty:
+            st.caption("No attendance records yet.")
+            return
+
+        st.dataframe(records.drop(columns=["attendance_id"]), width="stretch")
+
+        delete_id = st.selectbox(
+            "Select a record to delete",
+            options=[None] + list(records["attendance_id"]),
+            format_func=lambda aid: "-- select --" if aid is None else (
+                f"{records.loc[records.attendance_id == aid, 'member_name'].iloc[0]} — "
+                f"{records.loc[records.attendance_id == aid, 'event_name'].iloc[0]} — "
+                f"{records.loc[records.attendance_id == aid, 'status'].iloc[0]}"
+            ),
+            key="attendance_delete_select",
+        )
+        if delete_id is not None:
+            row = records.loc[records.attendance_id == delete_id].iloc[0]
+            label = f"{row['member_name']} — {row['event_name']} — {row['status']}"
+            if st.button("Delete record", type="primary", key="attendance_delete_btn"):
+                _confirm_delete_attendance_dialog(int(delete_id), label)
+
+
 def render(conn):
     st.header("Member attendance")
     _summary_charts(conn)
     st.divider()
     _members_list(conn)
+    st.divider()
+    _attendance_records_section(conn)
     st.divider()
     _import_section(conn)
     st.divider()
