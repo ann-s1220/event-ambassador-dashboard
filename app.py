@@ -175,6 +175,18 @@ st.markdown(get_css(dark_mode), unsafe_allow_html=True)
 db.init_db()
 conn = db.get_connection()
 
+# demo branch only. A fixed, frozen dataset (scripts/demo_seed_data.py,
+# a snapshot committed to this branch) rather than regenerating random
+# data on every startup -- so anyone opening the demo link sees the same
+# events, members, ambassador rankings, and feedback every time, which
+# is the point for referencing specific examples (e.g. in an interview).
+# Checked on every run, not just once, since Streamlit Cloud's
+# filesystem is ephemeral -- a fresh container restart means a fresh,
+# empty database again, same as a first-ever run.
+if conn.execute("SELECT COUNT(*) FROM events").fetchone()[0] == 0:
+    from scripts.demo_seed_data import load_into
+    load_into(conn)
+
 tabs = st.tabs(SECTION_NAMES)
 for tab, module in zip(tabs, SECTION_MODULES):
     with tab:
