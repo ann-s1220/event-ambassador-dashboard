@@ -31,14 +31,14 @@ SECTION_NAMES = [
 ]
 SECTION_MODULES = [attendance, ambassadors, feedback, data_management]
 
-if "dark_mode" not in st.session_state:
-    st.session_state["dark_mode"] = True
+if "_dark_mode_pref" not in st.session_state:
+    st.session_state["_dark_mode_pref"] = True
 
 # Login form and any not-yet-authenticated messaging need the theme too,
-# so this first injection uses whatever dark_mode currently holds (the
-# default, since the toggle itself only exists in the sidebar below,
+# so this first injection uses whatever the preference currently holds
+# (the default, since the toggle itself only exists in the sidebar below,
 # which is gated behind a successful login).
-st.markdown(get_css(st.session_state["dark_mode"]), unsafe_allow_html=True)
+st.markdown(get_css(st.session_state["_dark_mode_pref"]), unsafe_allow_html=True)
 
 st.title("Event & Ambassador Dashboard")
 
@@ -122,9 +122,25 @@ with st.sidebar:
             st.session_state["_pending_tab_click"] = i
             st.rerun()
     st.divider()
-    st.toggle("Dark mode", key="dark_mode")
+    # A plain `st.toggle(..., key="dark_mode")` intermittently reverted to
+    # its unset default (False) on reruns triggered by a widget inside one
+    # of the st.tabs() bodies (confirmed via logging -- reproduces even on
+    # pre-existing buttons unrelated to any single feature, so it's a
+    # platform-level widget-state quirk, not application logic). Tracking
+    # the preference in our own `_dark_mode_pref` key and feeding it back
+    # in as the toggle's `value=` every run sidesteps it: `value=` wins
+    # over whatever the widget's own persisted state would otherwise be,
+    # so a corrupted "dark_mode" key can't silently flip the theme.
+    def _sync_dark_mode_pref():
+        st.session_state["_dark_mode_pref"] = st.session_state["dark_mode"]
 
-st.markdown(get_css(st.session_state["dark_mode"]), unsafe_allow_html=True)
+    st.toggle(
+        "Dark mode", value=st.session_state["_dark_mode_pref"], key="dark_mode",
+        on_change=_sync_dark_mode_pref,
+    )
+
+dark_mode = st.session_state["_dark_mode_pref"]
+st.markdown(get_css(dark_mode), unsafe_allow_html=True)
 
 db.init_db()
 conn = db.get_connection()
