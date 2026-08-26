@@ -1,5 +1,6 @@
 import json
 import os
+import secrets
 
 import streamlit as st
 import streamlit.components.v1 as components
@@ -46,13 +47,33 @@ st.markdown(get_css(st.session_state["_dark_mode_pref"]), unsafe_allow_html=True
 
 st.title("Event & Ambassador Dashboard")
 
+# demo branch only. config.demo.yaml is gitignored, same as main's real
+# config.yaml -- but unlike main, there's no real credential to protect
+# here (demo/demo123 is printed on the login screen below, publicly, on
+# purpose), so a fresh checkout or deploy just gets it auto-created
+# instead of erroring out asking for a manual setup step. main's app.py
+# has no equivalent of this block; it still requires config.yaml to
+# already exist, with no auto-creation fallback.
 if not os.path.exists(CONFIG_PATH):
-    st.error(
-        f"No `{CONFIG_PATH}` found -- this app has no authorized users yet. "
-        "Create the first one by running:\n\n"
-        "```\npython scripts/manage_users.py add-user\n```"
-    )
-    st.stop()
+    demo_config = {
+        "cookie": {
+            "name": "event_ambassador_demo_auth",
+            "key": secrets.token_hex(32),
+            "expiry_days": 30,
+        },
+        "credentials": {
+            "usernames": {
+                "demo": {
+                    "name": "Demo User",
+                    "email": "demo@example.com",
+                    "password": stauth.Hasher.hash("demo123"),
+                    "roles": ["admin"],
+                }
+            }
+        },
+    }
+    with open(CONFIG_PATH, "w", encoding="utf-8") as f:
+        yaml.dump(demo_config, f, default_flow_style=False, allow_unicode=True)
 
 def save_auth_config() -> None:
     """Persist auth_config back to CONFIG_PATH. Needed because we hand
