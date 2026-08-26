@@ -219,7 +219,15 @@ def _excel_post_import_section(conn):
     if uploaded is None:
         return
 
-    data = pd.read_excel(uploaded)
+    try:
+        data = pd.read_excel(uploaded)
+    except Exception as e:
+        # Broad on purpose -- see the member Excel import in attendance.py:
+        # an uploaded file is a trust boundary, and a malformed/renamed
+        # file can fail in any of several ways.
+        print(f"Excel post import parse failure ({uploaded.name}): {e}")
+        st.error("Couldn't read that file as an Excel (.xlsx) file. Please check the format and try again.")
+        return
     st.caption(f"{len(data)} rows, {len(data.columns)} columns detected.")
     st.dataframe(data.head(5), width="stretch")
 

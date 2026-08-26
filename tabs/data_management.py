@@ -114,9 +114,12 @@ def render(conn):
     members = db.get_members_df(conn)
     if query:
         q = query.lower()
+        # regex=False: plain substring search -- pandas treats the pattern
+        # as regex by default, so an unescaped `[`, `(`, etc. typed into
+        # the search box would otherwise raise an uncaught regex error.
         results = members[
-            members["name"].str.lower().str.contains(q, na=False)
-            | members["email"].str.lower().str.contains(q, na=False)
+            members["name"].str.lower().str.contains(q, na=False, regex=False)
+            | members["email"].str.lower().str.contains(q, na=False, regex=False)
         ]
     else:
         results = members

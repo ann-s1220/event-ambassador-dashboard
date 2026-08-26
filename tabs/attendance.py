@@ -145,7 +145,16 @@ def _import_section(conn):
     if uploaded is None:
         return
 
-    data = pd.read_csv(uploaded)
+    try:
+        data = pd.read_csv(uploaded)
+    except Exception as e:
+        # Broad on purpose: this is a trust boundary (an arbitrary
+        # uploaded file), and pandas/its parser raise several different
+        # exception types for a malformed CSV -- none of which a user
+        # needs to see, they just need to know the file didn't work.
+        print(f"CSV import parse failure ({uploaded.name}): {e}")
+        st.error("Couldn't read that file as a CSV. Please check the format and try again.")
+        return
     st.caption(f"{len(data)} rows, {len(data.columns)} columns detected.")
     st.dataframe(data.head(5), width="stretch")
 
@@ -313,7 +322,15 @@ def _excel_import_section(conn):
     if uploaded is None:
         return
 
-    data = pd.read_excel(uploaded)
+    try:
+        data = pd.read_excel(uploaded)
+    except Exception as e:
+        # Broad on purpose -- see the CSV import above: an uploaded file
+        # is a trust boundary, and a malformed/renamed file can fail in
+        # any of several ways (bad zip, bad XML, wrong sheet structure).
+        print(f"Excel member import parse failure ({uploaded.name}): {e}")
+        st.error("Couldn't read that file as an Excel (.xlsx) file. Please check the format and try again.")
+        return
     st.caption(f"{len(data)} rows, {len(data.columns)} columns detected.")
     st.dataframe(data.head(5), width="stretch")
 
@@ -691,10 +708,16 @@ def _members_list(conn):
             filtered = filtered[filtered["member_id"].isin(attended_ids)]
         if search:
             s = search.lower()
+            # regex=False: this is meant as a plain substring search (per
+            # the "partial, case-insensitive" description in the README),
+            # and pandas treats str.contains's pattern as regex by default
+            # -- an unescaped `[`, `(`, etc. in the search box would
+            # otherwise raise an uncaught regex error straight from user
+            # input.
             filtered = filtered[
-                filtered["name"].str.lower().str.contains(s, na=False)
-                | filtered["email"].str.lower().str.contains(s, na=False)
-                | filtered["events_attended"].str.lower().str.contains(s, na=False)
+                filtered["name"].str.lower().str.contains(s, na=False, regex=False)
+                | filtered["email"].str.lower().str.contains(s, na=False, regex=False)
+                | filtered["events_attended"].str.lower().str.contains(s, na=False, regex=False)
             ]
 
         st.caption(f"{len(filtered)} member(s)")

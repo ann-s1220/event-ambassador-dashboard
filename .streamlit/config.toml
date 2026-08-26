@@ -4,3 +4,17 @@ backgroundColor = "#FFFEFC"
 secondaryBackgroundColor = "#F8EFF2"
 textColor = "#332A3D"
 font = "sans serif"
+
+[client]
+# Uncaught exceptions show only a generic message in the browser; full
+# tracebacks (exception type, message, stack trace) still print to the
+# server console/logs for debugging. Prevents internal details -- file
+# paths, library internals, DB schema -- leaking to end users.
+showErrorDetails = "none"
+
+[server]
+# Default is 200MB; nothing this app imports (member lists, attendance
+# rosters, social-post logs) should ever approach that. Capped low
+# enough to comfortably fit realistic files while limiting how much
+# memory a single upload can force the server to hold.
+maxUploadSize = 10
