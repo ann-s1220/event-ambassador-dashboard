@@ -334,3 +334,57 @@ def anonymize_member(conn, member_id: int) -> dict:
 
     log_deletion(conn, "Member record anonymized and erased at their request")
     return preview
+
+
+def get_event_deletion_preview(conn, event_id: int) -> dict:
+    """Counts of records that would be permanently deleted along with this
+    event. Unlike members/ambassadors, event_id is NOT NULL on attendance,
+    feedback, and ambassador_social_posts -- there's no anonymize-in-place
+    option here (the schema won't allow nulling it out), so deleting an
+    event cascades to every row that references it."""
+    event = conn.execute("SELECT * FROM events WHERE event_id = ?", (event_id,)).fetchone()
+    if event is None:
+        raise ValueError(f"No event with id {event_id}")
+
+    attendance_count = conn.execute(
+        "SELECT COUNT(*) FROM attendance WHERE event_id = ?", (event_id,)
+    ).fetchone()[0]
+    feedback_count = conn.execute(
+        "SELECT COUNT(*) FROM feedback WHERE event_id = ?", (event_id,)
+    ).fetchone()[0]
+    posts_count = conn.execute(
+        "SELECT COUNT(*) FROM ambassador_social_posts WHERE event_id = ?", (event_id,)
+    ).fetchone()[0]
+
+    return {
+        "event_id": event_id,
+        "name": event["name"],
+        "date": event["date"],
+        "attendance_rows_deleted": attendance_count,
+        "feedback_rows_deleted": feedback_count,
+        "social_post_rows_deleted": posts_count,
+    }
+
+
+def delete_event(conn, event_id: int) -> dict:
+    """Hard delete: the event and every attendance/feedback/social-post row
+    that references it. Not a GDPR concern (events aren't personal data),
+    and not optional the way it might seem -- event_id being NOT NULL on
+    all three tables means those rows can't be kept around unlinked, only
+    deleted alongside the event they're about. Logged to edit_log, not
+    deletion_log, since this isn't a privacy erasure."""
+    preview = get_event_deletion_preview(conn, event_id)
+
+    conn.execute("DELETE FROM attendance WHERE event_id = ?", (event_id,))
+    conn.execute("DELETE FROM feedback WHERE event_id = ?", (event_id,))
+    conn.execute("DELETE FROM ambassador_social_posts WHERE event_id = ?", (event_id,))
+    conn.execute("DELETE FROM events WHERE event_id = ?", (event_id,))
+    conn.commit()
+
+    log_edit(
+        conn,
+        f"Event deleted: {preview['name']} ({preview['date']}) -- also removed "
+        f"{preview['attendance_rows_deleted']} attendance, {preview['feedback_rows_deleted']} feedback, "
+        f"{preview['social_post_rows_deleted']} social post row(s)",
+    )
+    return preview

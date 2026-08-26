@@ -459,7 +459,27 @@ def _excel_import_section(conn):
             st.rerun()
 
 
+@st.dialog("Confirm delete")
+def _confirm_delete_event_dialog(event_id: int, label: str):
+    conn = st.session_state["_conn"]
+    preview = db.get_event_deletion_preview(conn, event_id)
+    st.write(f"You are about to delete the event: **{label}**.")
+    st.markdown("This is **irreversible**. It will also permanently delete:")
+    st.markdown(f"- **{preview['attendance_rows_deleted']}** attendance record(s)")
+    st.markdown(f"- **{preview['feedback_rows_deleted']}** feedback entry/entries")
+    st.markdown(f"- **{preview['social_post_rows_deleted']}** social post(s)")
+    st.markdown("Are you sure you want to delete this event? **This cannot be undone.**")
+    c1, c2 = st.columns(2)
+    if c1.button("Cancel"):
+        st.rerun()
+    if c2.button("Confirm delete", type="primary"):
+        db.delete_event(conn, event_id)
+        st.session_state["_event_deleted_notice"] = label
+        st.rerun()
+
+
 def _manual_form(conn):
+    st.session_state["_conn"] = conn
     st.subheader("Add / edit a member and attendance record")
     events = db.get_events_df(conn)
     ambassadors = db.get_ambassadors_df(conn)
@@ -595,7 +615,7 @@ def _manual_form(conn):
         st.success(f"Saved member '{name}'.")
         st.rerun()
 
-    with st.expander("Add a new event"):
+    with st.expander("Add / delete an event"):
         with st.form("add_event_form"):
             ev_name = st.text_input("Event name")
             ev_date = st.date_input("Date")
@@ -611,6 +631,35 @@ def _manual_form(conn):
                     st.rerun()
                 else:
                     st.error("Event name is required.")
+
+        st.divider()
+        st.markdown("**Delete an event**")
+        st.caption(
+            "Events don't support the anonymize-in-place erasure members/ambassadors get -- "
+            "attendance, feedback, and social-post records all require an event, so deleting one "
+            "permanently deletes every record tied to it too. You'll see exactly what before confirming."
+        )
+
+        if st.session_state.get("_event_deleted_notice"):
+            st.success(f"Deleted event: {st.session_state.pop('_event_deleted_notice')}")
+
+        if events.empty:
+            st.caption("No events to delete.")
+        else:
+            delete_event_id = st.selectbox(
+                "Select an event to delete",
+                options=[None] + list(events["event_id"]),
+                format_func=lambda eid: "-- select --" if eid is None else (
+                    f"{events.loc[events.event_id == eid, 'name'].iloc[0]} "
+                    f"({events.loc[events.event_id == eid, 'date'].iloc[0]})"
+                ),
+                key="event_delete_select",
+            )
+            if delete_event_id is not None:
+                row = events.loc[events.event_id == delete_event_id].iloc[0]
+                label = f"{row['name']} ({row['date']})"
+                if st.button("Delete event", type="primary", key="event_delete_btn"):
+                    _confirm_delete_event_dialog(int(delete_event_id), label)
 
 
 def _summary_charts(conn):
