@@ -13,7 +13,10 @@ from pathlib import Path
 import pandas as pd
 
 DB_DIR = Path(__file__).parent / "data"
-DB_PATH = DB_DIR / "event_ambassador.db"
+# demo branch only: a distinct filename from main's event_ambassador.db,
+# so this branch can never open, seed into, or overwrite whatever real
+# database a main checkout in the same working copy is using.
+DB_PATH = DB_DIR / "demo_event_ambassador.db"
 
 SCHEMA = """
 PRAGMA foreign_keys = ON;

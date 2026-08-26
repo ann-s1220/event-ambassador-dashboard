@@ -14,7 +14,11 @@ from tabs import ambassadors, attendance, data_management, feedback
 
 st.set_page_config(page_title="Event & Ambassador Dashboard", layout="wide")
 
-CONFIG_PATH = "config.yaml"
+# demo branch only: a distinct filename from main's config.yaml, so this
+# branch's demo account (see the login-screen note below) can never be
+# used to authenticate against whatever real config main is using in the
+# same working copy, and vice versa.
+CONFIG_PATH = "config.demo.yaml"
 
 # Native st.tabs() is the single source of truth for which section is
 # showing -- all four are rendered every run (exactly as before the
@@ -51,7 +55,7 @@ if not os.path.exists(CONFIG_PATH):
     st.stop()
 
 def save_auth_config() -> None:
-    """Persist auth_config back to config.yaml. Needed because we hand
+    """Persist auth_config back to CONFIG_PATH. Needed because we hand
     Authenticate a dict (not a file path) -- the library only auto-persists
     its own changes when constructed from a path, so anything that mutates
     auth_config in-session (a password reset, a new teammate) has to write
@@ -73,6 +77,11 @@ authenticator = stauth.Authenticate(
     auth_config["cookie"]["key"],
     auth_config["cookie"]["expiry_days"],
 )
+
+# demo branch only -- shown on the login screen (hidden again once
+# actually logged in, so it doesn't linger in the way once past it).
+if not st.session_state.get("authentication_status"):
+    st.info("**Demo login** — Username: `demo`  |  Password: `demo123`")
 
 try:
     authenticator.login()

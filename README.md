@@ -6,6 +6,21 @@
 A Streamlit dashboard for tracking event attendance and student ambassador
 performance, built with SQLite and pandas.
 
+> **You're on the `demo` branch.** This branch is for showing the dashboard
+> around without touching anything real -- it never shares a database or
+> login config with `main`:
+> - Database: `data/demo_event_ambassador.db` (`main` uses
+>   `data/event_ambassador.db`) -- reseed anytime with
+>   `python scripts/generate_synthetic_data.py`, it's 100% synthetic data.
+> - Login config: `config.demo.yaml` (`main` uses `config.yaml`), with one
+>   built-in account -- username `demo`, password `demo123` -- shown
+>   right on the login screen. Regenerate it (e.g. after deleting it) with
+>   the snippet in `scripts/seed_demo_config.py`.
+> - No branding banner at the top of the app (`main` has one).
+>
+> None of this affects `main` -- diff the two branches to see exactly
+> what differs (`app.py`, `db.py`, `.gitignore`, `style.py`).
+
 ## Features
 
 - **Member attendance** — opens with two stacked rows of pie-chart pairs.
