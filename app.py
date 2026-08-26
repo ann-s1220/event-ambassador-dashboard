@@ -6,7 +6,7 @@ import streamlit.components.v1 as components
 import yaml
 from yaml.loader import SafeLoader
 import streamlit_authenticator as stauth
-from streamlit_authenticator.utilities import LoginError
+from streamlit_authenticator.utilities import CredentialsError, LoginError, ResetError
 
 import db
 from style import get_css
@@ -50,8 +50,22 @@ if not os.path.exists(CONFIG_PATH):
     )
     st.stop()
 
+def save_auth_config() -> None:
+    """Persist auth_config back to config.yaml. Needed because we hand
+    Authenticate a dict (not a file path) -- the library only auto-persists
+    its own changes when constructed from a path, so anything that mutates
+    auth_config in-session (a password reset, a new teammate) has to write
+    it back out manually."""
+    with open(CONFIG_PATH, "w", encoding="utf-8") as f:
+        yaml.dump(auth_config, f, default_flow_style=False, allow_unicode=True)
+
+
 with open(CONFIG_PATH, encoding="utf-8") as f:
     auth_config = yaml.load(f, Loader=SafeLoader)
+
+st.session_state["_auth_config"] = auth_config
+st.session_state["_config_path"] = CONFIG_PATH
+st.session_state["_save_auth_config"] = save_auth_config
 
 authenticator = stauth.Authenticate(
     auth_config["credentials"],
@@ -72,6 +86,28 @@ if auth_status is False:
     st.stop()
 elif auth_status is None:
     st.warning("Please enter your username and password.")
+    st.stop()
+
+current_username = st.session_state.get("username")
+current_user_entry = auth_config["credentials"]["usernames"].get(current_username, {})
+
+# Teammates added via the admin "Add teammate" form (Data management tab)
+# start with a temporary password and this flag set -- they're shown
+# nothing else until they set their own password. reset_password() also
+# requires re-entering the temporary password, which doubles as proof
+# they were actually given it.
+if current_user_entry.get("must_change_password"):
+    st.info("Your account was created with a temporary password. Set your own password to continue.")
+    try:
+        if authenticator.reset_password(
+            current_username, fields={"Form name": "Set your new password"}
+        ):
+            auth_config["credentials"]["usernames"][current_username]["must_change_password"] = False
+            save_auth_config()
+            st.success("Password updated.")
+            st.rerun()
+    except (CredentialsError, ResetError) as e:
+        st.error(str(e))
     st.stop()
 
 # --- Everything below only runs for a signed-in, authorized user. ---

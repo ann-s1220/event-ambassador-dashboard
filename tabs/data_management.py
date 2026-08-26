@@ -1,6 +1,70 @@
 import streamlit as st
+from streamlit_authenticator import Hasher
 
 import db
+
+
+def _current_user_is_admin(auth_config: dict) -> bool:
+    username = st.session_state.get("username")
+    user = auth_config.get("credentials", {}).get("usernames", {}).get(username, {})
+    return "admin" in (user.get("roles") or [])
+
+
+def _add_teammate_section(auth_config: dict):
+    """Admin-only account creation -- deliberately the *only* way a new
+    login gets created (no public sign-up flow exists anywhere in the
+    app). New teammates get a temporary password and `must_change_password`
+    set, which app.py checks right after login to force them onto
+    streamlit-authenticator's own reset_password widget before they see
+    anything else."""
+    st.subheader("Add teammate")
+    st.caption(
+        "Creates a login for a new team member. Give them the username and temporary "
+        "password directly -- they'll be required to set their own password the first "
+        "time they sign in."
+    )
+
+    notice = st.session_state.pop("_new_teammate_notice", None)
+    if notice:
+        st.success(
+            f"Added **{notice['name']}** -- share the username **{notice['username']}** and the "
+            "temporary password you just set with them directly."
+        )
+
+    with st.form("add_teammate_form", clear_on_submit=True):
+        name = st.text_input("Name")
+        username = st.text_input(
+            "Username / email", help="What they'll type to log in -- typically their email."
+        )
+        temp_password = st.text_input("Temporary password", type="password")
+        submitted = st.form_submit_button("Add teammate", type="primary")
+
+    if not submitted:
+        return
+
+    name = name.strip()
+    username = username.strip().lower()
+    if not name or not username or not temp_password:
+        st.error("Name, username/email, and temporary password are all required.")
+        return
+
+    usernames = auth_config.setdefault("credentials", {}).setdefault("usernames", {})
+    if username in usernames:
+        st.error(
+            f"'{username}' already has an account. To reset an existing user's password, "
+            "use `python scripts/manage_users.py add-user` from the command line."
+        )
+        return
+
+    usernames[username] = {
+        "name": name,
+        "email": username,
+        "password": Hasher.hash(temp_password),
+        "must_change_password": True,
+    }
+    st.session_state["_save_auth_config"]()
+    st.session_state["_new_teammate_notice"] = {"username": username, "name": name}
+    st.rerun()
 
 
 @st.dialog("Confirm member erasure")
@@ -79,3 +143,8 @@ def render(conn):
     st.subheader("Deletion log")
     st.caption("Timestamp and generic action description only -- no personal data.")
     st.dataframe(db.get_deletion_log_df(conn)[["timestamp", "action_description"]], width="stretch")
+
+    auth_config = st.session_state.get("_auth_config")
+    if auth_config is not None and _current_user_is_admin(auth_config):
+        st.divider()
+        _add_teammate_section(auth_config)
