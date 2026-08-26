@@ -1,9 +1,11 @@
 import datetime as dt
 import html
 
+import pandas as pd
 import streamlit as st
 
 import db
+from excel_import import NONE_CHOICE, POST_TARGET_FIELDS, import_posts_excel, preview_posts, suggest_post_column_map
 from scoring import compute_ambassador_leaderboard
 
 # Podium visuals reuse the theme's CSS custom properties (defined at :root
@@ -122,6 +124,7 @@ def _roster(conn):
 
 def _leaderboard(conn):
     st.subheader("Leaderboard")
+    st.caption("Ranked by: successful referrals (×3) + social media posts (×1) + own event attendance (×1)")
     board = compute_ambassador_leaderboard(conn)
     if board.empty:
         st.caption("No ambassadors yet.")
@@ -205,6 +208,82 @@ def _log_post(conn):
             st.rerun()
 
 
+def _excel_post_import_section(conn):
+    """Bulk-log social media posts from an Excel file. Ambassadors are
+    matched by email (falling back to name) against the existing roster,
+    and events by name -- neither is auto-created from this import, so
+    any row that doesn't match lands in a visible "skipped" list with a
+    reason instead of silently failing or fabricating a roster entry."""
+    st.subheader("Import social media posts from Excel")
+    uploaded = st.file_uploader("Excel file (.xlsx)", type=["xlsx"], key="excel_post_file")
+    if uploaded is None:
+        return
+
+    data = pd.read_excel(uploaded)
+    st.caption(f"{len(data)} rows, {len(data.columns)} columns detected.")
+    st.dataframe(data.head(5), width="stretch")
+
+    st.markdown("**Map Excel columns to post fields**")
+    suggested = suggest_post_column_map(list(data.columns))
+    column_map = {}
+    cols = st.columns(2)
+    for i, field in enumerate(POST_TARGET_FIELDS):
+        with cols[i % 2]:
+            options = [NONE_CHOICE] + list(data.columns)
+            default = suggested.get(field, NONE_CHOICE)
+            idx = options.index(default) if default in options else 0
+            column_map[field] = st.selectbox(field, options, index=idx, key=f"excel_post_map_{field}")
+
+    if column_map["ambassador_email"] == NONE_CHOICE and column_map["ambassador_name"] == NONE_CHOICE:
+        st.warning("Map at least one of ambassador_email or ambassador_name before importing.")
+        return
+    missing_required = [f for f in ("event_name", "date_posted") if column_map[f] == NONE_CHOICE]
+    if missing_required:
+        st.warning(f"Map required field(s) before importing: {', '.join(missing_required)}")
+        return
+
+    signature = (uploaded.name, uploaded.size, tuple(sorted(column_map.items())))
+
+    if st.button("Preview import", type="primary", key="excel_post_preview_btn"):
+        classified = preview_posts(conn, data, column_map)
+        st.session_state["excel_post_preview"] = {
+            "signature": signature,
+            "matched": classified["matched"],
+            "unmatched": classified["unmatched"],
+            "committed": False,
+        }
+        st.rerun()
+
+    preview = st.session_state.get("excel_post_preview")
+    if not preview or preview["signature"] != signature:
+        return
+
+    st.subheader("Preview")
+    st.write(f"**{len(preview['matched'])}** post(s) ready to import, **{len(preview['unmatched'])}** skipped.")
+    if preview["matched"]:
+        with st.expander(f"Posts to import ({len(preview['matched'])})"):
+            st.dataframe(
+                pd.DataFrame(preview["matched"])[["ambassador_name", "event_name", "date_posted"]],
+                width="stretch",
+            )
+    if preview["unmatched"]:
+        with st.expander(f"Rows skipped ({len(preview['unmatched'])})"):
+            st.dataframe(
+                pd.DataFrame(preview["unmatched"])[["row", "ambassador_email", "event_name", "date_posted", "reason"]],
+                width="stretch",
+            )
+
+    if preview["committed"]:
+        st.success("Import already applied for this preview.")
+    elif st.button(
+        "Confirm import", type="primary", key="excel_post_confirm", disabled=not preview["matched"]
+    ):
+        created = import_posts_excel(conn, preview["matched"])
+        st.session_state["excel_post_preview"]["committed"] = True
+        st.success(f"Imported {created} social post(s).")
+        st.rerun()
+
+
 def render(conn):
     st.header("Ambassador performance")
     _leaderboard(conn)
@@ -212,3 +291,5 @@ def render(conn):
     _roster(conn)
     st.divider()
     _log_post(conn)
+    st.divider()
+    _excel_post_import_section(conn)

@@ -8,6 +8,10 @@ from csv_import import (
     import_attendance_csv, preview_members, suggest_column_map, suggest_source_map,
     suggest_status_map, unique_values,
 )
+from excel_import import (
+    MEMBER_REQUIRED_FIELDS, MEMBER_TARGET_FIELDS, MEMBER_TYPE_VALUES,
+    import_members_excel, suggest_member_column_map, suggest_member_type_map,
+)
 
 SYNC_REMOVAL_THRESHOLD = 0.5
 
@@ -22,6 +26,12 @@ SOURCE_LABELS = {"social_media": "Social media", "student_ambassador": "Student 
 # still reads clearly against both the light and dark chart background.
 SOURCE_COLORS = {"social_media": "#7A5C8E", "student_ambassador": "#D98F6E", "other": "#B5677A"}
 
+# Sized so slice labels sit well outside the arc (avoids overlap/crowding
+# between adjacent labels) with room to spare before the chart's edge.
+PIE_SIZE = 320
+PIE_OUTER_RADIUS = 75
+PIE_LABEL_RADIUS = 118
+
 
 def _attendance_pie_chart(att: pd.DataFrame, title: str):
     """Pie chart of attended vs. did-not-attend for the given attendance
@@ -33,6 +43,8 @@ def _attendance_pie_chart(att: pd.DataFrame, title: str):
     rows = []
     for status in ["attended", "did not attend"]:
         count = int(counts.get(status, 0))
+        if count == 0:
+            continue
         pct = round(100 * count / total) if total else 0
         rows.append({"status": status, "count": count, "label": f"{pct}% ({count})"})
     chart_df = pd.DataFrame(rows)
@@ -45,11 +57,14 @@ def _attendance_pie_chart(att: pd.DataFrame, title: str):
             legend=alt.Legend(title=None, orient="bottom"),
         ),
     )
-    arc = base.mark_arc(outerRadius=90)
-    labels = base.mark_text(radius=112, size=13).encode(text="label:N")
+    arc = base.mark_arc(outerRadius=PIE_OUTER_RADIUS)
+    labels = base.mark_text(radius=PIE_LABEL_RADIUS, size=12).encode(text="label:N")
     return (
         (arc + labels)
-        .properties(title=title, width=280, height=280, padding={"left": 20, "right": 20, "top": 10, "bottom": 10})
+        .properties(
+            title=title, width=PIE_SIZE, height=PIE_SIZE, background="transparent",
+            padding={"left": 30, "right": 30, "top": 15, "bottom": 15},
+        )
     )
 
 
@@ -75,6 +90,8 @@ def _source_pie_chart(att: pd.DataFrame, title: str):
     rows = []
     for source in SOURCE_LABELS:
         count = int(counts.get(source, 0))
+        if count == 0:
+            continue
         pct = round(100 * count / total) if total else 0
         rows.append({"source": SOURCE_LABELS[source], "count": count, "label": f"{pct}% ({count})"})
     chart_df = pd.DataFrame(rows)
@@ -87,11 +104,14 @@ def _source_pie_chart(att: pd.DataFrame, title: str):
             legend=alt.Legend(title=None, orient="bottom"),
         ),
     )
-    arc = base.mark_arc(outerRadius=90)
-    labels = base.mark_text(radius=112, size=13).encode(text="label:N")
+    arc = base.mark_arc(outerRadius=PIE_OUTER_RADIUS)
+    labels = base.mark_text(radius=PIE_LABEL_RADIUS, size=12).encode(text="label:N")
     return (
         (arc + labels)
-        .properties(title=title, width=280, height=280, padding={"left": 20, "right": 20, "top": 10, "bottom": 10})
+        .properties(
+            title=title, width=PIE_SIZE, height=PIE_SIZE, background="transparent",
+            padding={"left": 30, "right": 30, "top": 15, "bottom": 15},
+        )
     )
 
 
@@ -280,6 +300,148 @@ def _import_section(conn):
             st.rerun()
 
 
+def _excel_import_section(conn):
+    """Bulk member create/update from an Excel file, matched by email.
+    Deliberately member-only -- unlike the Luma CSV import above, this
+    never touches attendance. Shares the same column-mapping ->
+    preview -> confirm shape, and the sync/removal safety threshold, as
+    that import; session-state keys are namespaced with an `excel_`
+    prefix so the two imports don't collide when both are used in the
+    same session."""
+    st.subheader("Import members from Excel")
+    uploaded = st.file_uploader("Excel file (.xlsx)", type=["xlsx"], key="excel_member_file")
+    if uploaded is None:
+        return
+
+    data = pd.read_excel(uploaded)
+    st.caption(f"{len(data)} rows, {len(data.columns)} columns detected.")
+    st.dataframe(data.head(5), width="stretch")
+
+    st.markdown("**Map Excel columns to member fields**")
+    suggested = suggest_member_column_map(list(data.columns))
+    column_map = {}
+    cols = st.columns(2)
+    for i, field in enumerate(MEMBER_TARGET_FIELDS):
+        with cols[i % 2]:
+            options = [NONE_CHOICE] + list(data.columns)
+            default = suggested.get(field, NONE_CHOICE)
+            idx = options.index(default) if default in options else 0
+            column_map[field] = st.selectbox(field, options, index=idx, key=f"excel_map_{field}")
+
+    missing_required = [f for f in MEMBER_REQUIRED_FIELDS if column_map[f] == NONE_CHOICE]
+    if missing_required:
+        st.warning(f"Map required field(s) before importing: {', '.join(missing_required)}")
+        return
+
+    member_type_map = {}
+    if column_map["member_type"] != NONE_CHOICE:
+        raw_values = unique_values(data[column_map["member_type"]])
+        suggestion = suggest_member_type_map(raw_values)
+        st.markdown("**Map member type values**")
+        for v in raw_values:
+            member_type_map[v] = st.selectbox(
+                f"'{v}' ->", MEMBER_TYPE_VALUES,
+                index=MEMBER_TYPE_VALUES.index(suggestion.get(v, "non-student")),
+                key=f"excel_type_val_{v}",
+            )
+
+    sync_mode = st.checkbox(
+        "Flag members missing from this file for removal",
+        value=False,
+        key="excel_sync_mode",
+        help=(
+            "Compares every member currently in the system (however they were added) against "
+            "the emails in this file. Anyone not in the file is flagged for removal."
+        ),
+    )
+
+    signature = (
+        uploaded.name, uploaded.size,
+        tuple(sorted(column_map.items())),
+        repr(sorted(member_type_map.items())),
+        sync_mode,
+    )
+
+    if st.button("Preview import", type="primary", key="excel_preview_btn"):
+        st.session_state.pop("excel_import_sync_error", None)
+        st.session_state.pop("excel_import_preview", None)
+        classified = preview_members(conn, data, column_map)
+        to_remove = []
+        if sync_mode:
+            members = db.get_members_df(conn)
+            missing = members[~members["email"].str.lower().isin(classified["file_emails"])]
+            to_remove = missing[["member_id", "name", "email"]].to_dict("records")
+            total_members = len(members)
+            removal_fraction = (len(to_remove) / total_members) if total_members else 0.0
+            if removal_fraction > SYNC_REMOVAL_THRESHOLD:
+                st.session_state["excel_import_sync_error"] = (
+                    f"This file would remove {removal_fraction:.0%} of members, which exceeds the "
+                    f"{SYNC_REMOVAL_THRESHOLD:.0%} safety threshold. Please check that you uploaded "
+                    "the correct file."
+                )
+                st.session_state["excel_import_sync_error_sig"] = signature
+                st.rerun()
+        st.session_state["excel_import_preview"] = {
+            "signature": signature,
+            "to_create": classified["to_create"],
+            "to_update": classified["to_update"],
+            "to_remove": to_remove,
+            "sync_mode": sync_mode,
+            "committed": False,
+        }
+        st.rerun()
+
+    sync_error = st.session_state.get("excel_import_sync_error")
+    if sync_error and st.session_state.get("excel_import_sync_error_sig") == signature:
+        st.error(sync_error)
+        return
+
+    preview = st.session_state.get("excel_import_preview")
+    if not preview or preview["signature"] != signature:
+        return
+
+    st.subheader("Preview")
+    st.write(
+        f"**{len(preview['to_create'])}** member(s) to create, "
+        f"**{len(preview['to_update'])}** to update."
+    )
+    with st.expander(f"Members to create ({len(preview['to_create'])})"):
+        st.dataframe(pd.DataFrame(preview["to_create"], columns=["name", "email"]), width="stretch")
+    with st.expander(f"Members to update ({len(preview['to_update'])})"):
+        st.dataframe(pd.DataFrame(preview["to_update"], columns=["name", "email"]), width="stretch")
+
+    if preview["committed"]:
+        st.success("Create/update already applied for this preview.")
+    elif st.button("Confirm create/update", type="primary", key="excel_confirm_create_update"):
+        summary = import_members_excel(conn, data, column_map, member_type_map)
+        st.session_state["excel_import_preview"]["committed"] = True
+        st.success(f"Members created: {summary['members_created']}, updated: {summary['members_updated']}.")
+        if summary["rows_skipped_no_email"]:
+            st.warning(f"{summary['rows_skipped_no_email']} row(s) skipped -- no email present.")
+        st.rerun()
+
+    if preview["sync_mode"] and preview["to_remove"]:
+        st.divider()
+        st.error(
+            f"**{len(preview['to_remove'])} member(s) are missing from this file and flagged for "
+            "removal.** Review the list below -- this action is irreversible."
+        )
+        st.dataframe(pd.DataFrame(preview["to_remove"])[["name", "email"]], width="stretch")
+        ack_key = f"excel_removal_ack_{hash(signature)}"
+        ack = st.checkbox(
+            "I have reviewed this list and confirm these members should be permanently anonymized and removed.",
+            key=ack_key,
+        )
+        if st.button(
+            "Confirm removal (irreversible)", type="primary", key="excel_confirm_removal", disabled=not ack
+        ):
+            for m in preview["to_remove"]:
+                db.anonymize_member(conn, m["member_id"])
+            st.success(f"Removed {len(preview['to_remove'])} member(s).")
+            del st.session_state["excel_import_preview"]
+            st.rerun()
+
+
 def _manual_form(conn):
     st.subheader("Add / edit a member and attendance record")
     events = db.get_events_df(conn)
@@ -435,9 +597,11 @@ def _manual_form(conn):
 
 
 def _summary_charts(conn):
-    """Total attendance rate + source breakdown, side by side (Streamlit
-    stacks columns automatically on narrow viewports). This is the first
-    thing shown in the tab."""
+    """Two stacked rows of pie-chart pairs: an "All events" row (constant,
+    always aggregated across every event) on top, and a "By event" row
+    below it, driven by a dropdown (defaulting to the most recent event)
+    -- only that lower row updates when the dropdown changes. This is the
+    first thing shown in the tab."""
     events = db.get_events_df(conn)
     attendance = db.get_attendance_df(conn)
 
@@ -445,31 +609,42 @@ def _summary_charts(conn):
         st.info("No events yet -- add one further down to start tracking attendance.")
         return
 
+    st.markdown("**All events**")
+    if attendance.empty:
+        st.caption("No attendance records yet.")
+    else:
+        agg_c1, agg_c2 = st.columns(2)
+        with agg_c1:
+            st.altair_chart(_attendance_pie_chart(attendance, "Attendance rate"), use_container_width=False)
+            st.caption(_attendance_stat_line(attendance))
+        with agg_c2:
+            st.altair_chart(_source_pie_chart(attendance, "Source breakdown"), use_container_width=False)
+            st.caption(_source_stat_line(attendance))
+
+    st.markdown("**By event**")
+    events_by_date = events.sort_values("date", ascending=False)
     event_choice = st.selectbox(
-        "Event", options=["All"] + list(events["event_id"]),
-        format_func=lambda eid: "All events" if eid == "All" else events.loc[events.event_id == eid, "name"].iloc[0],
+        "Event", options=list(events_by_date["event_id"]),
+        format_func=lambda eid: events.loc[events.event_id == eid, "name"].iloc[0]
+        + " (" + events.loc[events.event_id == eid, "date"].iloc[0] + ")",
         key="view_event",
     )
-    att = attendance if event_choice == "All" else attendance[attendance.event_id == event_choice]
-    scope_label = "all events" if event_choice == "All" else events.loc[events.event_id == event_choice, "name"].iloc[0]
-
+    att = attendance[attendance.event_id == event_choice]
     if att.empty:
-        st.caption("No attendance records yet.")
-        return
-
-    col1, col2 = st.columns(2)
-    with col1:
-        st.markdown(f"**Overall attendance rate** ({scope_label})")
-        st.altair_chart(_attendance_pie_chart(att, scope_label), use_container_width=False)
-        st.markdown(_attendance_stat_line(att))
-    with col2:
-        st.markdown(f"**Source breakdown** ({scope_label})")
-        st.altair_chart(_source_pie_chart(att, scope_label), use_container_width=False)
-        st.markdown(_source_stat_line(att))
+        st.caption("No attendance records for this event yet.")
+    else:
+        ev_c1, ev_c2 = st.columns(2)
+        with ev_c1:
+            st.altair_chart(_attendance_pie_chart(att, "Attendance rate"), use_container_width=False)
+            st.caption(_attendance_stat_line(att))
+        with ev_c2:
+            st.altair_chart(_source_pie_chart(att, "Source breakdown"), use_container_width=False)
+            st.caption(_source_stat_line(att))
 
 
 def _members_list(conn):
     members = db.get_members_df(conn)
+    events = db.get_events_df(conn)
     event_history = db.df(
         conn,
         """SELECT a.member_id, GROUP_CONCAT(DISTINCT e.name) AS events_attended
@@ -481,7 +656,7 @@ def _members_list(conn):
     members["events_attended"] = members["events_attended"].fillna("")
 
     with st.expander("Members list", expanded=False):
-        fcol1, fcol2, fcol3 = st.columns(3)
+        fcol1, fcol2, fcol3, fcol4 = st.columns(4)
         with fcol1:
             type_filter = st.multiselect(
                 "Member type", ["student", "non-student"], default=["student", "non-student"],
@@ -490,6 +665,13 @@ def _members_list(conn):
         with fcol2:
             alum_filter = st.selectbox("Alumnus", ["All", "Yes", "No", "Unknown"], key="members_alum_filter")
         with fcol3:
+            event_filter = st.selectbox(
+                "Filter by event attended",
+                options=["All events"] + list(events["event_id"]),
+                format_func=lambda eid: "All events" if eid == "All events" else events.loc[events.event_id == eid, "name"].iloc[0],
+                key="members_event_filter",
+            )
+        with fcol4:
             search = st.text_input("Search name, email, or event attended", key="members_search")
 
         filtered = members[members["member_type"].isin(type_filter)] if type_filter else members
@@ -499,6 +681,14 @@ def _members_list(conn):
             filtered = filtered[filtered["is_alumnus"] == 0]
         elif alum_filter == "Unknown":
             filtered = filtered[filtered["is_alumnus"].isna()]
+        if event_filter != "All events":
+            attended_ids = {
+                row["member_id"] for row in conn.execute(
+                    "SELECT DISTINCT member_id FROM attendance WHERE status='attended' AND event_id=? AND member_id IS NOT NULL",
+                    (event_filter,),
+                ).fetchall()
+            }
+            filtered = filtered[filtered["member_id"].isin(attended_ids)]
         if search:
             s = search.lower()
             filtered = filtered[
@@ -526,5 +716,7 @@ def render(conn):
     _members_list(conn)
     st.divider()
     _import_section(conn)
+    st.divider()
+    _excel_import_section(conn)
     st.divider()
     _manual_form(conn)
