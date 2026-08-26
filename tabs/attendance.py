@@ -738,7 +738,11 @@ def _members_list(conn):
                 key="members_event_filter",
             )
         with fcol4:
-            search = st.text_input("Search name, email, or event attended", key="members_search")
+            search = st.text_input(
+                "Search all fields (name, email, type, role, company, degree, "
+                "alumnus/ambassador status, events attended)",
+                key="members_search",
+            )
 
         filtered = members[members["member_type"].isin(type_filter)] if type_filter else members
         if alum_filter == "Yes":
@@ -757,17 +761,31 @@ def _members_list(conn):
             filtered = filtered[filtered["member_id"].isin(attended_ids)]
         if search:
             s = search.lower()
+            # One combined haystack per row -- name/email plus every other
+            # searchable field (including events attended) -- rather than
+            # a long chain of ORed str.contains calls, so "typing any part
+            # of any of these fields" (including a boolean-ish field like
+            # is_alumnus/is_ambassador, translated to words first) is a
+            # single check instead of one branch per field.
+            text_cols = ["name", "email", "member_type", "job_role", "company", "year_of_study", "degree", "events_attended"]
+            haystack = filtered["name"].astype(str).str.lower()
+            for col in text_cols[1:]:
+                haystack = haystack + " " + filtered[col].fillna("").astype(str).str.lower()
+            # is_alumnus: nullable (Yes/No/Unknown) -- include synonyms so
+            # "alumni"/"alumnus" surface alumni the same way "yes" would.
+            haystack = haystack + " " + filtered["is_alumnus"].map(
+                {1: "alumnus alumni yes", 0: "no"}
+            ).fillna("unknown")
+            # is_ambassador: NOT NULL, so no unknown/NaN case to handle.
+            haystack = haystack + " " + filtered["is_ambassador"].map({1: "ambassador yes", 0: "no"})
+
             # regex=False: this is meant as a plain substring search (per
             # the "partial, case-insensitive" description in the README),
             # and pandas treats str.contains's pattern as regex by default
             # -- an unescaped `[`, `(`, etc. in the search box would
             # otherwise raise an uncaught regex error straight from user
             # input.
-            filtered = filtered[
-                filtered["name"].str.lower().str.contains(s, na=False, regex=False)
-                | filtered["email"].str.lower().str.contains(s, na=False, regex=False)
-                | filtered["events_attended"].str.lower().str.contains(s, na=False, regex=False)
-            ]
+            filtered = filtered[haystack.str.contains(s, na=False, regex=False)]
 
         st.caption(f"{len(filtered)} member(s)")
         display = filtered.copy()
