@@ -1,5 +1,6 @@
 import json
 import os
+from pathlib import Path
 
 import streamlit as st
 import streamlit.components.v1 as components
@@ -15,6 +16,25 @@ from tabs import ambassadors, attendance, data_management, feedback
 st.set_page_config(page_title="Event & Ambassador Dashboard", layout="wide")
 
 CONFIG_PATH = "config.yaml"
+BANNER_PATH = Path(__file__).parent / "assets" / "banner.png"
+
+
+def render_banner() -> None:
+    """Top-of-page banner, shown above the title on every page (including
+    the login screen, so it doesn't need separate pre-/post-auth handling).
+    st.image (not a base64 data-URI embedded via markdown) so the browser
+    fetches the bytes once and caches them -- app.py reruns top-to-bottom
+    on every interaction anywhere in the app, and a data-URI would get
+    re-embedded in the page HTML, and so re-sent over the websocket, on
+    every single one of those reruns. The actual crop/sizing (compact,
+    full page width, no distortion) is CSS in style.py, scoped to
+    `.st-key-banner` via the container's `key=`; see the comment there
+    for why. No-op until assets/banner.png exists, so dropping the file
+    in is all that's needed to turn it on."""
+    if not BANNER_PATH.exists():
+        return
+    with st.container(key="banner"):
+        st.image(str(BANNER_PATH), width="stretch")
 
 # Native st.tabs() is the single source of truth for which section is
 # showing -- all four are rendered every run (exactly as before the
@@ -40,6 +60,7 @@ if "_dark_mode_pref" not in st.session_state:
 # which is gated behind a successful login).
 st.markdown(get_css(st.session_state["_dark_mode_pref"]), unsafe_allow_html=True)
 
+render_banner()
 st.title("Event & Ambassador Dashboard")
 
 if not os.path.exists(CONFIG_PATH):

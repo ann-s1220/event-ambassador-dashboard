@@ -141,6 +141,36 @@ html, body {{
     fill: var(--text-muted) !important;
 }}
 
+/* Banner (top of app.py, above the tab navigation, shown on every page
+   including the login screen). The source image already has an opaque
+   background baked in (a KCL Womxn in STEM branded gradient), so it
+   doesn't need to react to the light/dark toggle at all -- it renders
+   identically either way, which is the point: a fixed brand image, not
+   a themed UI element. Cropped to a wide letterbox band via a fixed
+   aspect-ratio + object-fit: cover (crops top/bottom, never stretches --
+   stretching would distort, cropping just shows less of it) so it spans
+   the full page width but stays short enough not to push the tabs below
+   the fold, at any screen width. Scoped to `.st-key-banner` (see the
+   st.container(key="banner") wrapper in app.py) instead of a bare
+   [data-testid="stImage"] selector, so this won't accidentally catch
+   some other st.image() call added later. width needs !important --
+   Streamlit's own JS bakes a computed `width: <n>px` directly onto the
+   img's style attribute (an inline style, so it otherwise wins over
+   this stylesheet regardless of selector specificity), and that
+   computed value isn't reliably kept in sync with the actual container
+   width after a viewport resize. */
+.st-key-banner [data-testid="stImage"] img {{
+    width: 100% !important;
+    aspect-ratio: 5 / 1;
+    object-fit: cover;
+    object-position: center;
+    border-radius: 12px;
+    display: block;
+}}
+.st-key-banner {{
+    margin-bottom: 0.75rem;
+}}
+
 /* Headings */
 h1, h2, h3, h4, h5,
 [data-testid="stMarkdownContainer"] h1,
