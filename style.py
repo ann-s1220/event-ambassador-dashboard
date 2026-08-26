@@ -115,6 +115,16 @@ html, body {{
 [data-testid="stSidebar"] * {{
     color: var(--text) !important;
 }}
+/* The collapse/expand arrow lives outside [data-testid="stSidebar"] (it
+   has to stay visible even when the sidebar is fully collapsed), so the
+   blanket rule above never reaches it -- it was stuck at Streamlit's
+   baked-in light-theme icon color regardless of mode. Targeted directly
+   here for both the collapse (sidebar open) and expand (sidebar closed)
+   states. */
+[data-testid="stSidebarCollapseButton"] [data-testid="stIconMaterial"],
+[data-testid="stExpandSidebarButton"] [data-testid="stIconMaterial"] {{
+    color: var(--text) !important;
+}}
 
 /* Widget labels and plain text: Streamlit bakes an explicit color onto
    these elements (not just inherited), so ancestor overrides alone don't
@@ -187,6 +197,15 @@ button[kind="primary"]:hover, button[kind="primaryFormSubmit"]:hover {{
     filter: brightness(1.08);
     color: #fff !important;
 }}
+/* Sidebar nav "active" state: applied by injected JS (see app.py), not a
+   Streamlit button `type`, since which section is showing is tracked by
+   native st.tabs() -- this just needs to look identical to a primary
+   button. */
+[data-testid="stSidebar"] .stButton > button.nav-active {{
+    background: var(--gradient) !important;
+    border: none !important;
+    color: #fff !important;
+}}
 
 /* Inputs */
 .stTextInput input, .stTextArea textarea, .stNumberInput input, .stDateInput input,
@@ -221,8 +240,35 @@ button[kind="primary"]:hover, button[kind="primaryFormSubmit"]:hover {{
     background-color: var(--border) !important;
 }}
 
-/* Card-like surfaces */
-[data-testid="stDataFrame"], [data-testid="stExpander"], [data-testid="stAlert"],
+/* Tables / dataframes -- one shared block for every st.dataframe in the
+   app (members list, attendance, ambassador roster, full leaderboard,
+   referred attendees, feedback, GDPR search results, deletion log, ...),
+   so any future table matches automatically without extra work.
+   Important caveat: st.dataframe paints its grid to an HTML5 canvas
+   (glide-data-grid) -- header/cell backgrounds, text, and gridlines are
+   pixel-rendered from Streamlit's static server-side theme
+   (.streamlit/config.toml) once per session and are not reachable by CSS
+   or by this toggle (verified: neither injected CSS variables nor
+   Streamlit's own embed_options=dark_theme mechanism change canvas pixel
+   color -- only a server restart with different config.toml values
+   would). Cell text stays dark-on-white regardless of mode, which is
+   always high-contrast/readable on its own terms, just not chromatically
+   matched to the page. Everything below is what CSS *can* reach: the
+   container chrome, border, radius, and hover accent. */
+[data-testid="stDataFrame"] {{
+    border-radius: 12px !important;
+    border: 1px solid var(--border) !important;
+    background-color: var(--bg-secondary);
+    overflow: hidden;
+    transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}}
+[data-testid="stDataFrame"]:hover {{
+    border-color: var(--coral) !important;
+    box-shadow: 0 0 0 3px rgba(217, 143, 110, 0.15);
+}}
+
+/* Other card-like surfaces */
+[data-testid="stExpander"], [data-testid="stAlert"],
 [data-testid="stFileUploaderDropzone"] {{
     border-radius: 12px !important;
     border: 1px solid var(--border) !important;
@@ -255,7 +301,7 @@ button[kind="primary"]:hover, button[kind="primaryFormSubmit"]:hover {{
 }}
 
 /* Charts */
-[data-testid="stVegaLiteChart"] svg {{ background-color: var(--bg-secondary) !important; }}
+[data-testid="stVegaLiteChart"] svg {{ background-color: transparent !important; }}
 [data-testid="stVegaLiteChart"] svg text {{ fill: var(--text-muted) !important; }}
 [data-testid="stVegaLiteChart"] svg line {{ stroke: var(--border) !important; }}
 [data-testid="stVegaLiteChart"] svg .domain {{ stroke: var(--border) !important; }}
