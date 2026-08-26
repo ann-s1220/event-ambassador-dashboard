@@ -147,6 +147,14 @@ def render(conn):
     st.caption("Timestamp and generic action description only -- no personal data.")
     st.dataframe(db.get_deletion_log_df(conn)[["timestamp", "action_description"]], width="stretch")
 
+    st.divider()
+    st.subheader("Edit log")
+    st.caption(
+        "Hard deletes of mistaken attendance/feedback/social-post entries (Tabs 1-3) -- "
+        "separate from the deletion log above, which is GDPR erasures only."
+    )
+    st.dataframe(db.get_edit_log_df(conn)[["timestamp", "action_description"]], width="stretch")
+
     auth_config = st.session_state.get("_auth_config")
     if auth_config is not None and _current_user_is_admin(auth_config):
         st.divider()

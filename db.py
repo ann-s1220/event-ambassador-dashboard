@@ -88,6 +88,18 @@ CREATE TABLE IF NOT EXISTS deletion_log (
     timestamp TEXT NOT NULL,
     action_description TEXT NOT NULL
 );
+
+-- Separate from deletion_log on purpose: deletion_log is a GDPR erasure
+-- trail and deliberately holds no identifying detail (see anonymize_member).
+-- edit_log is plain internal auditing for hard deletes of data-entry
+-- mistakes (a wrong attendance/feedback/social-post row) -- not privacy
+-- requests -- so it can name what was deleted (event, status, rating, ...)
+-- without mixing that into the GDPR-sensitive log.
+CREATE TABLE IF NOT EXISTS edit_log (
+    log_id INTEGER PRIMARY KEY AUTOINCREMENT,
+    timestamp TEXT NOT NULL,
+    action_description TEXT NOT NULL
+);
 """
 
 
@@ -238,6 +250,18 @@ def log_deletion(conn, action_description: str) -> None:
         (datetime.now(timezone.utc).isoformat(timespec="seconds"), action_description),
     )
     conn.commit()
+
+
+def log_edit(conn, action_description: str) -> None:
+    conn.execute(
+        "INSERT INTO edit_log (timestamp, action_description) VALUES (?, ?)",
+        (datetime.now(timezone.utc).isoformat(timespec="seconds"), action_description),
+    )
+    conn.commit()
+
+
+def get_edit_log_df(conn) -> pd.DataFrame:
+    return df(conn, "SELECT * FROM edit_log ORDER BY log_id DESC")
 
 
 def get_anonymization_preview(conn, member_id: int) -> dict:
