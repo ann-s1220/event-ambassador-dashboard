@@ -69,6 +69,9 @@ def add_user(args):
         sys.exit("Passwords did not match.")
 
     usernames[username] = {
+        **{k: v for k, v in usernames.get(username, {}).items() if k not in (
+            "name", "email", "password", "password_reset_requested", "password_reset_requested_at",
+        )},
         "name": name,
         "email": email,
         "password": stauth.Hasher.hash(password),
@@ -98,7 +101,8 @@ def list_users(args):
         print("No users configured yet.")
         return
     for username, info in usernames.items():
-        print(f"{username}\t{info.get('name', '')}\t{info.get('email', '')}")
+        flag = " [password reset requested]" if info.get("password_reset_requested") else ""
+        print(f"{username}\t{info.get('name', '')}\t{info.get('email', '')}{flag}")
 
 
 def main():

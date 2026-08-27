@@ -157,6 +157,45 @@ no tab or data renders until you sign in, and the login form itself
 follows the light/dark theme. There's no public sign-up; access is
 limited to whoever has an entry in `config.yaml`.
 
+**Log in with username or email.** The single login field ("Username or
+email") is checked against both the `usernames` key and the `email` value
+of every account in `config.yaml`, case-insensitively, before the
+password is validated against whichever account matched. streamlit-authenticator's
+own `login()` widget only ever matches by username key with no email
+fallback and no way to hook one in — see
+[auth_helpers.py](auth_helpers.py)'s `render_login_form`, which
+re-renders that widget's form (cookie check, sleep, submit) with an
+identifier-resolution step in front of it.
+
+**Forgot password?** This app has no outbound-email setup, so instead of
+streamlit-authenticator's own `forgot_password()` widget — which resets
+the password immediately and would hand the new plaintext value back on
+the same, unauthenticated login screen with no proof of identity, since
+there's no email to send it to instead — a "Forgot password?" link on the
+login screen only flags the matched account (`password_reset_requested`
++ a timestamp in `config.yaml`) for an admin to see and act on. The
+response is identical whether or not the entered username/email matched
+an account, so the form can't be used to enumerate valid accounts.
+Admins see a **Teammates** list on the Data management (GDPR) tab with a
+"Password reset requested" status next to the affected account, and set
+a new temporary password for them there — the same manual hand-off
+"Add teammate" already uses (a temp password the admin picks and shares
+directly, with `must_change_password` forcing the teammate onto their
+own password on next login). An admin also gets a dismissible pop-up
+(`st.dialog`, themed like the rest of the app) the first time they land
+on any page in a given login if requests are outstanding — "You have N
+pending password reset request(s)" with a button straight to the
+Teammates list — so it doesn't rely on an admin thinking to check.
+Checked once per login (not once per rerun/tab click): a login triggers
+more than one script rerun in quick succession (the auth cookie gets set
+right after a successful one), and a dialog only stays open on a rerun
+that actually re-invokes it, so the "should this be open" flag is kept
+separate from the "have we already checked this login" flag and is only
+flipped off by the dialog's own Dismiss / "Go to Manage Teammates"
+buttons — otherwise that second, automatic rerun closes it before it's
+ever visible. See [auth_helpers.py](auth_helpers.py)'s
+`render_pending_reset_notice`.
+
 **Where credentials live:** `config.yaml` at the project root, holding a
 bcrypt hash per authorized user plus a random cookie-signing key. It's
 listed in `.gitignore` and doesn't exist until you create the first user

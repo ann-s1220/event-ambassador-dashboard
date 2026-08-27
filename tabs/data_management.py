@@ -1,3 +1,4 @@
+import pandas as pd
 import streamlit as st
 from streamlit_authenticator import Hasher
 
@@ -65,6 +66,73 @@ def _add_teammate_section(auth_config: dict):
     st.session_state["_save_auth_config"]()
     st.session_state["_new_teammate_notice"] = {"username": username, "name": name}
     st.rerun()
+
+
+def _teammates_list_section(auth_config: dict):
+    """Lists every teammate account and flags any pending admin-mediated
+    password-reset request -- submitted via the "Forgot password?" link on
+    the login screen (see auth_helpers.py); this app has no outbound-email
+    setup, so the request lands here instead of resetting anything
+    automatically. Setting a new temporary password below follows the same
+    manual hand-off as "Add teammate" above: the admin picks a temporary
+    password and shares it with the teammate directly, and
+    must_change_password forces them to replace it on their next login."""
+    st.subheader("Teammates")
+    usernames = auth_config.get("credentials", {}).get("usernames", {})
+    if not usernames:
+        st.caption("No teammates yet.")
+        return
+
+    def _status(user: dict) -> str:
+        if user.get("password_reset_requested"):
+            return "Password reset requested"
+        if user.get("must_change_password"):
+            return "Must set password"
+        return "Active"
+
+    rows = [
+        {
+            "Name": user.get("name", ""),
+            "Username": username,
+            "Roles": ", ".join(user.get("roles") or []),
+            "Status": _status(user),
+        }
+        for username, user in usernames.items()
+    ]
+    st.dataframe(pd.DataFrame(rows), width="stretch")
+
+    notice = st.session_state.pop("_teammate_password_reset_notice", None)
+    if notice:
+        st.success(
+            f"Set a new temporary password for **{notice}** -- share it with them "
+            "directly. They'll be required to set their own password on next login."
+        )
+
+    st.markdown("**Set a new temporary password**")
+    target_username = st.selectbox(
+        "Teammate",
+        options=list(usernames.keys()),
+        format_func=lambda u: (
+            f"{usernames[u].get('name', u)} ({u})"
+            + (" — password reset requested" if usernames[u].get("password_reset_requested") else "")
+        ),
+        key="teammate_password_reset_select",
+    )
+    with st.form("teammate_password_reset_form", clear_on_submit=True):
+        new_temp_password = st.text_input("New temporary password", type="password")
+        submitted = st.form_submit_button("Set temporary password", type="primary")
+    if submitted:
+        if not new_temp_password:
+            st.error("Enter a temporary password.")
+        else:
+            target = usernames[target_username]
+            target["password"] = Hasher.hash(new_temp_password)
+            target["must_change_password"] = True
+            target.pop("password_reset_requested", None)
+            target.pop("password_reset_requested_at", None)
+            st.session_state["_save_auth_config"]()
+            st.session_state["_teammate_password_reset_notice"] = target.get("name", target_username)
+            st.rerun()
 
 
 @st.dialog("Confirm member erasure")
@@ -159,3 +227,5 @@ def render(conn):
     if auth_config is not None and _current_user_is_admin(auth_config):
         st.divider()
         _add_teammate_section(auth_config)
+        st.divider()
+        _teammates_list_section(auth_config)
