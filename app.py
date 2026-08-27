@@ -10,6 +10,10 @@ import streamlit_authenticator as stauth
 from streamlit_authenticator.utilities import CredentialsError, LoginError, ResetError
 
 import db
+from auth_helpers import (
+    clear_pending_reset_notice_on_logout, render_forgot_password_section,
+    render_login_form, render_pending_reset_notice,
+)
 from style import get_css
 from tabs import ambassadors, attendance, data_management, feedback
 
@@ -96,10 +100,12 @@ authenticator = stauth.Authenticate(
 )
 
 try:
-    authenticator.login()
+    render_login_form(authenticator, auth_config)
 except LoginError as e:
     st.error(str(e))
     st.stop()
+
+render_forgot_password_section(auth_config, save_auth_config)
 
 auth_status = st.session_state.get("authentication_status")
 if auth_status is False:
@@ -133,9 +139,12 @@ if current_user_entry.get("must_change_password"):
 
 # --- Everything below only runs for a signed-in, authorized user. ---
 
+is_admin = "admin" in (current_user_entry.get("roles") or [])
+render_pending_reset_notice(auth_config, is_admin, SECTION_NAMES)
+
 with st.sidebar:
     st.markdown(f"Signed in as **{st.session_state.get('name')}**")
-    authenticator.logout("Logout", "sidebar")
+    authenticator.logout("Logout", "sidebar", callback=clear_pending_reset_notice_on_logout)
     st.divider()
     st.markdown("**Navigate**")
     for i, name in enumerate(SECTION_NAMES):
