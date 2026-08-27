@@ -92,6 +92,20 @@ def save_auth_config() -> None:
 with open(CONFIG_PATH, encoding="utf-8") as f:
     auth_config = yaml.load(f, Loader=SafeLoader)
 
+# demo branch only. Unlike the auto-create block above -- which only ever
+# runs the very first time, when config.demo.yaml doesn't exist at all --
+# this runs on every startup, so a config.demo.yaml left over from before
+# admin-only teammate management existed (or hand-edited some other way)
+# self-heals instead of silently leaving the demo account without access
+# to Manage Teammates. Scoped to exactly the "demo" entry: safe here since
+# this is a fixed, public demo account with no real credential behind it,
+# unlike a `main` admin, which should only ever get its role from a
+# deliberate `manage_users.py` edit.
+demo_user = auth_config.get("credentials", {}).get("usernames", {}).get("demo")
+if demo_user is not None and "admin" not in (demo_user.get("roles") or []):
+    demo_user["roles"] = [*(demo_user.get("roles") or []), "admin"]
+    save_auth_config()
+
 st.session_state["_auth_config"] = auth_config
 st.session_state["_config_path"] = CONFIG_PATH
 st.session_state["_save_auth_config"] = save_auth_config
