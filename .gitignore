@@ -6,3 +6,4 @@ __pycache__/
 .DS_Store
 config.yaml
 secrets.toml
+config.demo.yaml

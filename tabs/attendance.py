@@ -9,8 +9,8 @@ from csv_import import (
     suggest_status_map, unique_values,
 )
 from excel_import import (
-    MEMBER_REQUIRED_FIELDS, MEMBER_TARGET_FIELDS, MEMBER_TYPE_VALUES,
-    import_members_excel, suggest_member_column_map, suggest_member_type_map,
+    MEMBER_REQUIRED_FIELDS, MEMBER_TARGET_FIELDS,
+    import_members_excel, suggest_member_column_map,
 )
 
 SYNC_REMOVAL_THRESHOLD = 0.5
@@ -339,7 +339,7 @@ def _excel_import_section(conn):
     that import; session-state keys are namespaced with an `excel_`
     prefix so the two imports don't collide when both are used in the
     same session."""
-    st.subheader("Import members from Excel")
+    st.subheader("Import students from Excel")
     uploaded = st.file_uploader("Excel file (.xlsx)", type=["xlsx"], key="excel_member_file")
     if uploaded is None:
         return
@@ -372,17 +372,7 @@ def _excel_import_section(conn):
         st.warning(f"Map required field(s) before importing: {', '.join(missing_required)}")
         return
 
-    member_type_map = {}
-    if column_map["member_type"] != NONE_CHOICE:
-        raw_values = unique_values(data[column_map["member_type"]])
-        suggestion = suggest_member_type_map(raw_values)
-        st.markdown("**Map member type values**")
-        for v in raw_values:
-            member_type_map[v] = st.selectbox(
-                f"'{v}' ->", MEMBER_TYPE_VALUES,
-                index=MEMBER_TYPE_VALUES.index(suggestion.get(v, "non-student")),
-                key=f"excel_type_val_{v}",
-            )
+    st.caption("Everyone imported here is categorised as a student.")
 
     sync_mode = st.checkbox(
         "Flag members missing from this file for removal",
@@ -397,7 +387,6 @@ def _excel_import_section(conn):
     signature = (
         uploaded.name, uploaded.size,
         tuple(sorted(column_map.items())),
-        repr(sorted(member_type_map.items())),
         sync_mode,
     )
 
@@ -407,10 +396,15 @@ def _excel_import_section(conn):
         classified = preview_members(conn, data, column_map)
         to_remove = []
         if sync_mode:
+            # Scoped to students only: this import path categorises everyone
+            # as a student, so comparing against the full member base (which
+            # also includes non-students this file was never meant to
+            # represent) would misjudge the removal percentage.
             members = db.get_members_df(conn)
-            missing = members[~members["email"].str.lower().isin(classified["file_emails"])]
+            students = members[members["member_type"] == "student"]
+            missing = students[~students["email"].str.lower().isin(classified["file_emails"])]
             to_remove = missing[["member_id", "name", "email"]].to_dict("records")
-            total_members = len(members)
+            total_members = len(students)
             removal_fraction = (len(to_remove) / total_members) if total_members else 0.0
             if removal_fraction > SYNC_REMOVAL_THRESHOLD:
                 st.session_state["excel_import_sync_error"] = (
@@ -452,7 +446,7 @@ def _excel_import_section(conn):
     if preview["committed"]:
         st.success("Create/update already applied for this preview.")
     elif st.button("Confirm create/update", type="primary", key="excel_confirm_create_update"):
-        summary = import_members_excel(conn, data, column_map, member_type_map)
+        summary = import_members_excel(conn, data, column_map)
         st.session_state["excel_import_preview"]["committed"] = True
         st.success(f"Members created: {summary['members_created']}, updated: {summary['members_updated']}.")
         if summary["rows_skipped_no_email"]:
