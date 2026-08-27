@@ -28,9 +28,17 @@ SOURCE_COLORS = {"social_media": "#7A5C8E", "student_ambassador": "#D98F6E", "ot
 
 # Sized so slice labels sit well outside the arc (avoids overlap/crowding
 # between adjacent labels) with room to spare before the chart's edge.
-PIE_SIZE = 320
+# PIE_SIZE was previously 320 with a label radius of 118 -- close enough
+# to the chart's own width that a 3-item bottom legend ("Social media" /
+# "Student ambassador" / "Other") measured as literally wider than the
+# chart, clipping "Other" off the right edge (confirmed by comparing
+# rendered SVG text bounding boxes against the chart's own SVG bounds,
+# not just eyeballing it). Widening the chart and pushing the label
+# radius further out from the (unchanged) arc radius gives both the
+# percentage labels and the legend real breathing room.
+PIE_SIZE = 380
 PIE_OUTER_RADIUS = 75
-PIE_LABEL_RADIUS = 118
+PIE_LABEL_RADIUS = 130
 
 
 def _attendance_pie_chart(att: pd.DataFrame, title: str):
@@ -54,7 +62,14 @@ def _attendance_pie_chart(att: pd.DataFrame, title: str):
         color=alt.Color(
             "status:N",
             scale=alt.Scale(domain=list(PIE_COLORS.keys()), range=list(PIE_COLORS.values())),
-            legend=alt.Legend(title=None, orient="bottom"),
+            # columns=2: forces the legend to wrap instead of laying every
+            # item out in a single row -- the 3-item source-breakdown
+            # legend ("Social media" / "Student ambassador" / "Other") is
+            # what actually overflowed (measured wider than the chart
+            # itself), and wrapping is what guarantees that can't happen
+            # again regardless of exact label text width, rather than
+            # just widening the chart to fit today's specific label text.
+            legend=alt.Legend(title=None, orient="bottom", columns=2, labelLimit=160),
         ),
     )
     arc = base.mark_arc(outerRadius=PIE_OUTER_RADIUS)
@@ -63,7 +78,7 @@ def _attendance_pie_chart(att: pd.DataFrame, title: str):
         (arc + labels)
         .properties(
             title=title, width=PIE_SIZE, height=PIE_SIZE, background="transparent",
-            padding={"left": 30, "right": 30, "top": 15, "bottom": 15},
+            padding={"left": 35, "right": 35, "top": 15, "bottom": 20},
         )
     )
 
@@ -101,7 +116,14 @@ def _source_pie_chart(att: pd.DataFrame, title: str):
         color=alt.Color(
             "source:N",
             scale=alt.Scale(domain=list(SOURCE_LABELS.values()), range=list(SOURCE_COLORS.values())),
-            legend=alt.Legend(title=None, orient="bottom"),
+            # columns=2: forces the legend to wrap instead of laying every
+            # item out in a single row -- the 3-item source-breakdown
+            # legend ("Social media" / "Student ambassador" / "Other") is
+            # what actually overflowed (measured wider than the chart
+            # itself), and wrapping is what guarantees that can't happen
+            # again regardless of exact label text width, rather than
+            # just widening the chart to fit today's specific label text.
+            legend=alt.Legend(title=None, orient="bottom", columns=2, labelLimit=160),
         ),
     )
     arc = base.mark_arc(outerRadius=PIE_OUTER_RADIUS)
@@ -110,7 +132,7 @@ def _source_pie_chart(att: pd.DataFrame, title: str):
         (arc + labels)
         .properties(
             title=title, width=PIE_SIZE, height=PIE_SIZE, background="transparent",
-            padding={"left": 30, "right": 30, "top": 15, "bottom": 15},
+            padding={"left": 35, "right": 35, "top": 15, "bottom": 20},
         )
     )
 
