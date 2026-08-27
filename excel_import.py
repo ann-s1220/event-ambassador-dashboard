@@ -9,16 +9,14 @@ import db
 from csv_import import NONE_CHOICE, parse_bool
 
 MEMBER_TARGET_FIELDS = [
-    "name", "email", "member_type", "job_role", "company",
+    "name", "email", "job_role", "company",
     "is_alumnus", "year_of_study", "degree",
 ]
 MEMBER_REQUIRED_FIELDS = {"name", "email"}
-MEMBER_TYPE_VALUES = ["student", "non-student"]
 
 _MEMBER_AUTO_SUGGEST = {
     "name": ["full name", "name"],
     "email": ["email"],
-    "member_type": ["member type", "type", "student status"],
     "job_role": ["role", "job title", "title"],
     "company": ["company", "organization", "employer"],
     "is_alumnus": ["alumni", "alumnus"],
@@ -85,16 +83,6 @@ def suggest_member_column_map(columns: list[str]) -> dict[str, str]:
     return mapping
 
 
-def suggest_member_type_map(values: list[str]) -> dict[str, str]:
-    out = {}
-    for v in values:
-        low = v.lower()
-        # Check "non" first -- "non-student" contains "student" as a
-        # substring, so a plain "student" in low check would misclassify it.
-        out[v] = "non-student" if "non" in low else ("student" if "student" in low else "non-student")
-    return out
-
-
 def suggest_post_column_map(columns: list[str]) -> dict[str, str]:
     mapping = {f: NONE_CHOICE for f in POST_TARGET_FIELDS}
     lowered = {c: c.lower().strip() for c in columns}
@@ -110,7 +98,7 @@ def suggest_post_column_map(columns: list[str]) -> dict[str, str]:
     return mapping
 
 
-def import_members_excel(conn, data: pd.DataFrame, column_map: dict[str, str], member_type_map: dict[str, str]) -> dict:
+def import_members_excel(conn, data: pd.DataFrame, column_map: dict[str, str]) -> dict:
     """Create/update members by email from a mapped Excel file. Never
     touches attendance -- members only."""
     summary = {"members_created": 0, "members_updated": 0, "rows_skipped_no_email": 0}
@@ -129,15 +117,16 @@ def import_members_excel(conn, data: pd.DataFrame, column_map: dict[str, str], m
         is_alumnus_raw = _cell(row, column_map, "is_alumnus")
         is_alumnus = parse_bool(is_alumnus_raw) if is_alumnus_raw is not None else None
 
-        member_type_raw = _cell(row, column_map, "member_type")
-        mapped_type = member_type_map.get(member_type_raw) if member_type_raw else None
-        inferred_type = db.infer_member_type(job_role, year_of_study, degree)
+        # This import path is student-only by design (see the 50%
+        # sync-removal threshold in tabs/attendance.py, which is scoped to
+        # students to match) -- every row is categorised as a student
+        # regardless of any member_type column mapped in the file.
+        member_type = "student"
 
         existing = conn.execute("SELECT * FROM members WHERE lower(email) = ?", (email,)).fetchone()
         ambassador_match = conn.execute("SELECT * FROM ambassadors WHERE lower(email) = ?", (email,)).fetchone()
 
         if existing is None:
-            member_type = mapped_type or inferred_type or "non-student"
             f_job_role, f_company, f_year, f_degree, f_is_alumnus = db.type_specific_fields(
                 member_type, job_role, company, year_of_study, degree, is_alumnus
             )
@@ -156,7 +145,6 @@ def import_members_excel(conn, data: pd.DataFrame, column_map: dict[str, str], m
             summary["members_created"] += 1
         else:
             member_id = existing["member_id"]
-            member_type = mapped_type or inferred_type or existing["member_type"]
             new_name = name or existing["name"]
             new_job_role = job_role if job_role is not None else existing["job_role"]
             new_company = company if company is not None else existing["company"]
