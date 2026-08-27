@@ -1,4 +1,3 @@
-import pandas as pd
 import streamlit as st
 from streamlit_authenticator import Hasher
 
@@ -68,15 +67,44 @@ def _add_teammate_section(auth_config: dict):
     st.rerun()
 
 
+@st.dialog("Confirm delete")
+def _confirm_delete_teammate_dialog(username: str, name: str):
+    # Belt-and-suspenders on top of the disabled button for this row: the
+    # button can't fire for the currently logged-in account, but this
+    # closes off any path that might otherwise let someone lock themselves
+    # out (e.g. a stale button reference from before a role/username
+    # change earlier in the same session).
+    if username == st.session_state.get("username"):
+        st.error("You can't remove the account you're currently logged in as.")
+        if st.button("Close"):
+            st.rerun()
+        return
+
+    st.write(f"You are about to remove **{name}**'s access.")
+    st.markdown("Are you sure you want to remove this teammate? **This cannot be undone.**")
+    c1, c2 = st.columns(2)
+    if c1.button("Cancel"):
+        st.rerun()
+    if c2.button("Confirm delete", type="primary"):
+        auth_config = st.session_state["_auth_config"]
+        auth_config["credentials"]["usernames"].pop(username, None)
+        st.session_state["_save_auth_config"]()
+        st.session_state["_teammate_deleted_notice"] = name
+        st.rerun()
+
+
 def _teammates_list_section(auth_config: dict):
-    """Lists every teammate account and flags any pending admin-mediated
-    password-reset request -- submitted via the "Forgot password?" link on
-    the login screen (see auth_helpers.py); this app has no outbound-email
-    setup, so the request lands here instead of resetting anything
-    automatically. Setting a new temporary password below follows the same
-    manual hand-off as "Add teammate" above: the admin picks a temporary
-    password and shares it with the teammate directly, and
-    must_change_password forces them to replace it on their next login."""
+    """Lists every teammate account -- each with an inline "Remove" action
+    -- and flags any pending admin-mediated password-reset request --
+    submitted via the "Forgot password?" link on the login screen (see
+    auth_helpers.py); this app has no outbound-email setup, so the request
+    lands here instead of resetting anything automatically. Rendered as a
+    manual row-per-teammate loop rather than st.dataframe, since a
+    dataframe has no way to embed an interactive button inside a row.
+    Setting a new temporary password below follows the same manual
+    hand-off as "Add teammate" above: the admin picks a temporary password
+    and shares it with the teammate directly, and must_change_password
+    forces them to replace it on their next login."""
     st.subheader("Teammates")
     usernames = auth_config.get("credentials", {}).get("usernames", {})
     if not usernames:
@@ -90,16 +118,29 @@ def _teammates_list_section(auth_config: dict):
             return "Must set password"
         return "Active"
 
-    rows = [
-        {
-            "Name": user.get("name", ""),
-            "Username": username,
-            "Roles": ", ".join(user.get("roles") or []),
-            "Status": _status(user),
-        }
-        for username, user in usernames.items()
-    ]
-    st.dataframe(pd.DataFrame(rows), width="stretch")
+    deleted_notice = st.session_state.pop("_teammate_deleted_notice", None)
+    if deleted_notice:
+        st.success(f"Removed **{deleted_notice}**'s access.")
+
+    current_username = st.session_state.get("username")
+    col_widths = [2, 2, 1.5, 2, 1]
+    for col, label in zip(st.columns(col_widths), ["Name", "Username", "Roles", "Status", ""]):
+        col.markdown(f"**{label}**")
+
+    for username, user in usernames.items():
+        name_col, username_col, roles_col, status_col, action_col = st.columns(col_widths)
+        name_col.write(user.get("name", ""))
+        username_col.write(username)
+        roles_col.write(", ".join(user.get("roles") or []) or "—")
+        status_col.write(_status(user))
+        is_self = username == current_username
+        if action_col.button(
+            "Remove",
+            key=f"remove_teammate_{username}",
+            disabled=is_self,
+            help="You can't remove the account you're currently logged in as." if is_self else None,
+        ):
+            _confirm_delete_teammate_dialog(username, user.get("name") or username)
 
     notice = st.session_state.pop("_teammate_password_reset_notice", None)
     if notice:
